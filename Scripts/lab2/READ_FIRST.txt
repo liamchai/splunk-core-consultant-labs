@@ -1,0 +1,50 @@
+1. Install Splunk — every host (sh1, mc1, idx1, idx2, uf1)
+sudo ./Scripts/install_splunk.sh
+Note: this script assumes a splunk-*.tgz Enterprise tarball at /opt and hardcodes SPLUNK_HOME=/opt/splunk. If uf1's staged package is a splunkforwarder-*.tgz, edit the script's tarball glob and SPLUNK_HOME before running there.
+
+2. Indexers — idx1, idx2
+sudo ./Scripts/lab2/deploy_ap2_all_indexer_base.sh
+
+3. Distributed search — sh1, then mc1
+# on sh1 (fill in idx1/idx2 hostnames in PEERS first)
+sudo ./Scripts/lab2/configure_distributed_search_sh.sh
+
+# on mc1 (fill in idx1/idx2/sh1 hostnames in PEERS first)
+sudo ./Scripts/lab2/configure_distributed_search_mc.sh
+
+4. Monitoring Console — mc1
+sudo ./Scripts/lab2/configure_monitoring_console.sh
+
+5. Deployment clients — mc1, idx1, idx2, uf1 (not sh1 — it's the deployment server)
+# edit DEPLOYMENT_SERVER_URI to sh1's host:8089 first
+# on uf1: export SPLUNK_HOME=/opt/splunkforwarder before running
+sudo ./Scripts/lab2/deploy_ap2_all_deployment_client.sh
+
+6. Forwarding — uf1, then sh1
+# on uf1: fill in INDEXERS, leave ALSO_DEPLOY_TO_DEPLOYMENT_APPS=false,
+# export SPLUNK_HOME=/opt/splunkforwarder
+sudo ./Scripts/lab2/deploy_ap2_all_forwarder_outputs.sh
+
+# on sh1: fill in INDEXERS, edit ALSO_DEPLOY_TO_DEPLOYMENT_APPS=true
+sudo ./Scripts/lab2/deploy_ap2_all_forwarder_outputs.sh
+
+7. os index — idx1, idx2, then sh1 (staged copy)
+# on idx1 and idx2
+sudo ./Scripts/lab2/deploy_ap2_all_indexes.sh
+
+# on sh1: edit ALSO_DEPLOY_TO_DEPLOYMENT_APPS=true first
+sudo ./Scripts/lab2/deploy_ap2_all_indexes.sh
+
+8. Unix/Linux TA — sh1 only
+# manually download the add-on from Splunkbase first, stage it, then set
+# TA_TARBALL_PATH in the script to match
+sudo ./Scripts/lab2/deploy_ap2_splunk_ta_nix.sh
+
+9. Serverclasses — sh1 only, last
+sudo ./Scripts/lab2/deploy_ap2_serverclass_config.sh
+
+10. Verify — from sh1's search bar
+index=_internal | stats count by host   (expect 5 hosts)
+index=os | stats count by host          (expect 5 hosts)
+
+Remaining manual pieces, unavoidable: the Splunkbase login/download in step 8, and the final "Grade My Work" click in the lab UI. The DMC "configure forwarder monitoring" wizard needs no separate config of its own — it's already satisfied by the peers and distributed mode set in steps 3–4.
