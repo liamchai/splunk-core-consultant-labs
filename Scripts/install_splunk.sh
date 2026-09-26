@@ -9,7 +9,7 @@ set -euo pipefail
 SPLUNK_USER="splunk"
 SPLUNK_HOME="/opt/splunk"
 ADMIN_USER="admin"
-ADMIN_PASS="4hj2juj6"
+ADMIN_PASS="9maomk44"
 
 log() { echo "==> $*"; }
 die() { echo "ERROR: $*" >&2; exit 1; }

@@ -1,0 +1,72 @@
+Before running ANY lab3 script on ANY host, export the shared admin
+credentials once per shell session. Every script uses the same
+SPLUNK_ADMIN_USER/SPLUNK_ADMIN_PASSWORD for both local auth and (where a
+script talks to a remote peer) the remote credentials — no per-script
+editing of usernames/passwords needed:
+
+sudo su
+  export SPLUNK_ADMIN_USER=admin
+  export SPLUNK_ADMIN_PASSWORD='9maomk44'
+
+Topology values (hostnames/IPs, deployment server URI, index/peer lists)
+still need editing inside each script before running it — those are
+structural, not credentials.
+
+0. Install Splunk
+   # on sh1, mc1, idx1, idx2 (Enterprise, expects /opt/splunk-*.tgz)
+   sudo ./Scripts/install_splunk.sh
+   # on uf1, uf2, uf3, uf4, if1, if2 (Universal Forwarder, expects
+   # /opt/splunkforwarder-*.tgz, installs to /opt/splunkforwarder)
+   sudo ./Scripts/install_uf.sh
+
+1. Indexers — idx1, idx2
+   sudo ./Scripts/lab3/deploy_ap3_all_indexer_base.sh
+
+2. Distributed search — sh1, then mc1
+   # on sh1 (fill in idx1/idx2 in PEERS first)
+   sudo ./Scripts/lab3/configure_distributed_search_sh.sh
+   # on mc1 (fill in idx1/idx2/sh1 in PEERS first)
+   sudo ./Scripts/lab3/configure_distributed_search_mc.sh
+
+3. Monitoring Console — mc1
+   sudo ./Scripts/lab3/configure_monitoring_console.sh
+
+4. Deployment clients — 9 hosts, NOT sh1
+   # edit DEPLOYMENT_SERVER_URI to sh1's host:8089 first
+   # on uf1-4, if1-2: export SPLUNK_HOME=/opt/splunkforwarder first
+   sudo ./Scripts/lab3/deploy_ap3_deployment_client.sh
+   # run on: mc1, idx1, idx2, uf1, uf2, uf3, uf4, if1, if2
+   # verify in the Forwarder Management UI on sh1: all 9 clients phoned home
+
+5. Internal forwarder outputs (if1/if2 -> indexers) — sh1 ONLY
+   # fill in INDEXERS (idx1, idx2) first
+   sudo ./Scripts/lab3/deploy_ap3_internal_forwarder_outputs.sh
+
+6. Intermediate forwarder apps (limits/pipelines/inputs) — sh1 ONLY
+   sudo ./Scripts/lab3/deploy_ap3_intermediate_forwarder_apps.sh
+
+7. External forwarder outputs (uf1-4 -> if1/if2) — sh1 ONLY
+   # fill in INTERMEDIATE_FORWARDERS (if1, if2) first
+   sudo ./Scripts/lab3/deploy_ap3_external_forwarder_outputs.sh
+
+8. /opt/splunkdata — idx1, idx2, sh1, mc1
+   sudo ./Scripts/lab3/prepare_splunkdata_dirs.sh
+
+9. Volume-based indexes (indexer + search variants) — sh1 ONLY, after step 8
+   sudo ./Scripts/lab3/deploy_ap3_volume_indexes.sh
+
+10. Sherlock/Watson/Moriarty/Novels indexes — sh1 ONLY
+    sudo ./Scripts/lab3/deploy_ap3_all_indexes.sh
+
+11. Content-based routing (props/transforms + forwarder inputs) — sh1 ONLY
+    sudo ./Scripts/lab3/deploy_ap3_sherlock_routing.sh
+
+12. Serverclasses — sh1 ONLY, LAST (after steps 5-7, 9-11)
+    sudo ./Scripts/lab3/deploy_ap3_serverclass_config.sh
+
+13. Verify — from sh1's search bar
+    index=_internal | stats count by host   (after step 4/serverclasses: 6 hosts, then 10)
+    index=* | stats count by index          (expect sherlock, watson, moriarty, novels)
+    index=* | stats count by host           (expect all 4 external forwarders)
+
+Remaining manual piece: the final "Grade My Work" click in the lab UI.
