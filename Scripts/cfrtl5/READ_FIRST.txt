@@ -1,0 +1,110 @@
+Topology reminder: sh1, mc1, idx1, idx2 already exist and are already
+running Splunk (a "pre-existing" stand-alone infrastructure) — do NOT run
+install_splunk.sh against them. cm1 is brand new (no existing Splunk
+installation). mc1 is BOTH the Monitoring Console AND the Deployment Server
+(DS) for this lab — unlike cfrtl4, where that dual role was sh1's.
+
+Before running ANY cfrtl5 script on ANY host, export the shared admin
+credentials once per shell session, PLUS the cluster-wide pass4SymmKey
+(this one is NOT a login password — it's the shared secret that lets a peer
+or search head join the cluster; it must be byte-for-byte identical on cm1,
+idx1, idx2, and sh1):
+
+  export SPLUNK_ADMIN_USER=admin
+  export SPLUNK_ADMIN_PASSWORD='<password from your server list>'
+  export CLUSTER_PASS4SYMMKEY='<a secret you choose, same string on every host>'
+
+Topology values (hostnames/IPs, mgmt/replication ports, client names) still
+need editing inside each script before running it — those are structural,
+not credentials.
+
+0. Install Splunk — cm1 ONLY (sh1/mc1/idx1/idx2 already have it)
+   sudo ./Scripts/install_splunk.sh
+
+1. Peer the management console to sh1, idx1, and idx2 — mc1 ONLY
+   sudo ./Scripts/cfrtl5/configure_distributed_search_mc.sh
+   # verify: Settings -> Distributed Search -> Search Peers lists all 3
+
+2. Build the cluster-indexer app content on the DS — mc1 ONLY
+   # fill in CLUSTER_MANAGER_URI (cm1's bare IP:8089) and export
+   # CLUSTER_PASS4SYMMKEY first
+   sudo ./Scripts/cfrtl5/build_cfrtl5_cluster_indexer_apps.sh
+
+3. Serverclasses (all_indexers, cluster_master, all_hosts blacklist) — mc1
+   ONLY, after step 2
+   # fill in IDX1_CLIENT_NAME / IDX2_CLIENT_NAME / CM1_CLIENT_NAME first
+   # (use each host's own `hostname` output, not the lab's display name —
+   # CM1_CLIENT_NAME will only resolve once cm1 exists and has phoned home,
+   # so you may need to re-run this after step 5)
+   sudo ./Scripts/cfrtl5/deploy_cfrtl5_serverclass_config.sh
+
+4. Turn cm1 into a Cluster Manager — cm1 ONLY, after step 0
+   # export CLUSTER_PASS4SYMMKEY (same value as step 2) first
+   sudo ./Scripts/cfrtl5/build_cfrtl5_cluster_manager_base.sh
+   # verify: cm1's GUI reports Cluster Master mode, no peers configured yet
+
+5. Make cm1 a (manager-apps-only) deployment client of mc1 — cm1 ONLY
+   # edit DEPLOYMENT_SERVER_URI to mc1's bare public IP:8089 first
+   sudo ./Scripts/cfrtl5/deploy_cfrtl5_manager_deploymentclient.sh
+   # verify on mc1: Settings -> Forwarder Management -> Clients (cm1 present)
+   # then re-run step 3 if CM1_CLIENT_NAME wasn't known yet
+   # check on cm1: ls $SPLUNK_HOME/etc/manager-apps (should show
+   # cfrtl5_cluster_indexer_base once the DS has pushed it)
+
+6. Add cm1 as a search peer of the monitoring console — mc1 ONLY
+   # re-run step 1's script with cm1 uncommented in its PEERS array
+   sudo ./Scripts/cfrtl5/configure_distributed_search_mc.sh
+
+7. Monitoring Console distributed mode — mc1
+   sudo ./Scripts/cfrtl5/configure_monitoring_console.sh
+
+8. Migrate idx1, then idx2, into the cluster — idx1 AND idx2 (run twice)
+   # fill in CLUSTER_MANAGER_URI (same as step 2/4) and DEPLOYMENTCLIENT_APP
+   # (whatever this pre-existing environment's deployment-client app is
+   # actually called on these hosts) first; export CLUSTER_PASS4SYMMKEY
+   sudo ./Scripts/cfrtl5/migrate_cfrtl5_indexer_to_cluster.sh
+   # verify on cm1: Settings -> Indexer Clustering -> Indexer Clustering
+   # Status shows 2 searchable peers
+
+9. Connect the search head to the cluster — sh1 ONLY, after step 8
+   # fill in CLUSTER_MANAGER_URI and INDEXERS (idx1, idx2) first; export
+   # CLUSTER_PASS4SYMMKEY
+   sudo ./Scripts/cfrtl5/deploy_cfrtl5_search_head_cluster.sh
+   # verify: sh1's Search Peers list shows idx1 + idx2; cm1's UI lists sh1
+   # as a search head against the cluster
+
+10. Migrate the pre-cluster "onboarding" bucket data — idx1 (repeat on any
+    other host that held stand-alone data pre-migration)
+    sudo ./Scripts/cfrtl5/migrate_cfrtl5_onboarding_buckets.sh
+    # verify on cm1: Settings -> Indexer Clustering -> Indexes shows
+    # onboarding with replicated buckets; on sh1:
+    # | dbinspect index=onboarding   (expect rb_-prefixed paths, repeated IDs)
+
+11. Verify — from sh1's search bar
+    | rest /services/server/info
+    index=onboarding | stats count by splunk_server   (over All Time)
+
+Remaining manual pieces: retrieving the base config templates from the
+Google Drive link in the lab guide (this repo's Configurations-IndexReplication/
+already has the same org_cluster_manager_base / org_cluster_indexer_base /
+org_cluster_search_base / org_cluster_forwarder_outputs / org_manager_deploymentclient
+templates the scripts above are built from — the Drive link is only needed if
+you want to cross-check against the stock zips directly), and the final
+"Grade My Work" click in the lab UI.
+
+Assumptions made building this lab (verify against your actual environment):
+- The pre-existing "indexer" serverclass this lab's step 7 refers to
+  ("add the same apps that the indexer class has") is treated here as
+  'all_indexers' with the single cfrtl5_cluster_indexer_base app — if your
+  pre-existing infra already has a differently-named/broader indexer
+  serverclass, mirror ITS actual app list onto 'cluster_master' instead.
+- 'stateOnClient = noop' is applied to the cluster_master serverclass's app
+  entries (step 8 in the PDF says "for the indexer server class", which is
+  ambiguous — the newly-created cluster_master class is the one holding
+  copies of the indexer's apps, so that's the one this interprets it as).
+- DEPLOYMENTCLIENT_APP in migrate_cfrtl5_indexer_to_cluster.sh assumes
+  idx1/idx2 already run a deployment-client app named
+  cfrtl5_all_deploymentclient — edit this if your pre-existing setup used a
+  different name.
+- No license-manager configuration is included — the lab guide doesn't
+  mention it, unlike cfrtl4.

@@ -1,0 +1,90 @@
+Topology reminder: aio1 already exists and is already running Splunk (it's
+the pre-existing "all-in-one" host being migrated) — do NOT run
+install_splunk.sh against it. idx1, sh1, and mc1 are brand new hosts. sh1 is
+BOTH the search head AND the Deployment Server (DS) for this lab.
+
+Before running ANY cfrtl4 script on ANY host, export the shared admin
+credentials once per shell session. Every script uses the same
+SPLUNK_ADMIN_USER/SPLUNK_ADMIN_PASSWORD for both local auth and (where a
+script talks to a remote peer) the remote credentials:
+
+  export SPLUNK_ADMIN_USER=admin
+  export SPLUNK_ADMIN_PASSWORD='<password from your server list>'
+
+Topology values (hostnames/IPs, deployment/license server URIs, peer lists,
+serverclass client names) still need editing inside each script before
+running it — those are structural, not credentials.
+
+0. Install Splunk — idx1, sh1, mc1 ONLY (not aio1, it's already installed)
+   sudo ./Scripts/install_splunk.sh
+
+1. Deployment client bootstrap — idx1, mc1 (aio1 comes later, step 8)
+   # edit DEPLOYMENT_SERVER_URI to sh1's bare public IP:8089 first
+   sudo ./Scripts/cfrtl4/deploy_cfrtl4_deploymentclient.sh
+   # verify on sh1: Settings -> Forwarder Management -> Clients (idx1, mc1 present)
+
+2. Build the indexer-tier apps — sh1 ONLY
+   # fill in INDEXER_VOLUME_PATH / LICENSE_MANAGER_URI first
+   sudo ./Scripts/cfrtl4/build_cfrtl4_indexer_apps.sh
+
+3. Build the base cfrtl4_all_indexes app — sh1 ONLY
+   # ONBOARDING_INDEX_STANZA can be left empty for now, filled in after step 7
+   sudo ./Scripts/cfrtl4/deploy_cfrtl4_all_indexes.sh
+
+4. Build the search-tier apps — sh1 ONLY
+   # fill in INDEXERS (idx1, aio1) first
+   sudo ./Scripts/cfrtl4/build_cfrtl4_search_apps.sh
+
+5. Harvest aio1's existing sourcetypes/index — aio1 ONLY (read-only discovery)
+   sudo ./Scripts/cfrtl4/harvest_aio1_sourcetypes.sh
+   # copy the printed btool stanzas out for the next two steps
+
+6. Build the 4 sourcetype props apps — sh1 ONLY
+   # paste harvested content into the *_PROPS_CONTENT / *_TRANSFORMS_CONTENT vars
+   sudo ./Scripts/cfrtl4/build_cfrtl4_sourcetype_props_apps.sh
+
+7. Re-run step 3 with the harvested onboarding index stanza filled in — sh1 ONLY
+   sudo ONBOARDING_INDEX_STANZA='[onboarding]
+homePath = volume:primary/onboarding/db
+coldPath = volume:primary/onboarding/colddb
+thawedPath = $SPLUNK_DB/onboarding/thaweddb' ./Scripts/cfrtl4/deploy_cfrtl4_all_indexes.sh
+
+8. Migrate aio1 into a deployment client — aio1 ONLY
+   # fill in NEW_SERVER_NAME, STALE_CONF_FILES (from step 5's output), and
+   # DEPLOYMENT_SERVER_URI first
+   sudo ./Scripts/cfrtl4/prepare_aio1_migration.sh
+   # verify on sh1: Settings -> Forwarder Management -> Clients (aio1 present)
+
+9. Serverclasses — sh1 ONLY, after steps 2, 3/7, 4, 6
+   # fill in IDX1_CLIENT_NAME / AIO1_CLIENT_NAME / MC1_CLIENT_NAME first
+   # (use each host's own `hostname` output, not the lab's display name)
+   sudo ./Scripts/cfrtl4/deploy_cfrtl4_serverclass_config.sh
+
+10. Mirror the all_search_heads apps onto sh1 itself — sh1 ONLY (it can't
+    deploy to itself)
+    sudo ./Scripts/cfrtl4/mirror_cfrtl4_search_head_apps.sh
+
+11. Restart to pick up pushed config — idx1, aio1, mc1
+    # confirm each host's etc/apps has the new content first, then:
+    sudo -u splunk env SPLUNK_USERNAME=admin SPLUNK_PASSWORD='<password>' /opt/splunk/bin/splunk restart
+
+12. Distributed search — sh1, then mc1
+    # on sh1 (fill in idx1/aio1 in PEERS first)
+    sudo ./Scripts/cfrtl4/configure_distributed_search_sh.sh
+    # on mc1 (fill in idx1/aio1/sh1 in PEERS first)
+    sudo ./Scripts/cfrtl4/configure_distributed_search_mc.sh
+
+13. Monitoring Console — mc1
+    sudo ./Scripts/cfrtl4/configure_monitoring_console.sh
+
+14. Verify — from sh1's search bar
+    | rest /services/server/info
+    (expect 3 nodes: sh1 = search_head, idx1/aio1 = indexer + search_peer,
+    all 3 = deployment_client — except sh1, which is the deployment_server)
+    index=_internal | stats count by splunk_server
+
+Remaining manual pieces: retrieving the base config templates from the
+Google Drive link in the lab guide (renaming "org_" to "cfrtl4_" is handled
+by the scripts above, but you still need the templates' exact stock content
+if it differs from what's under Configurations-Base/ locally), and the final
+"Grade My Work" click in the lab UI.

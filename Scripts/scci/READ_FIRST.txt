@@ -1,0 +1,76 @@
+Topology reminder: this lab has only TWO hosts. aio1 is a pre-existing
+all-in-one instance that is ALREADY running Splunk and is ALREADY the
+Deployment Server (DS) — do NOT run install_splunk.sh against it. fwd1 is a
+brand-new forwarder/Universal Forwarder instance being connected to aio1 for
+the first time. Everything — indexing, searching, license, DS — happens on
+aio1; fwd1 only collects and forwards.
+
+Before running ANY scci script on ANY host, export the shared admin
+credentials once per shell session:
+
+  export SPLUNK_ADMIN_USER=admin
+  export SPLUNK_ADMIN_PASSWORD='<password from your server list>'
+
+Topology values (aio1's bare public IP, fwd1's client name as reported by
+its own `hostname`) still need editing inside each script before running it
+— those are structural, not credentials.
+
+Manual/unavoidable first step: download the "base_configs" template folder
+from https://drive.google.com/drive/folders/107qWrfsv17j5bLxc21ymTagjtHG0AobF
+— these scripts write the same conf content directly, using "scci" in place
+of the "org" prefix, but the lab wants you to have looked at the originals
+too.
+
+0. Install Splunk — fwd1 ONLY (not aio1, it's already installed)
+   # if fwd1's staged package is a splunkforwarder-*.tgz:
+   sudo ./Scripts/install_uf.sh
+   # if fwd1 is a full Enterprise forwarder host instead:
+   sudo ./Scripts/install_splunk.sh
+
+1. Deployment client app, DS-side copy — aio1
+   # edit DEPLOYMENT_SERVER_URI to aio1's own bare public IP:8089 first
+   sudo ./Scripts/scci/build_scci_deploymentclient_app.sh
+
+2. Deployment client bootstrap — fwd1
+   # edit DEPLOYMENT_SERVER_URI to aio1's bare public IP:8089 first
+   # if fwd1 is a Universal Forwarder: export SPLUNK_HOME=/opt/splunkforwarder
+   sudo ./Scripts/scci/deploy_scci_deploymentclient.sh
+   # verify on aio1: Settings -> Forwarder Management -> Clients (fwd1 present)
+
+3. Open aio1's receiving port — aio1
+   sudo ./Scripts/scci/enable_scci_indexer_receiving.sh
+
+4. Inputs + outputs apps — aio1
+   # fill in AIO1_RECEIVING_URI (aio1-host-or-ip:9997) first
+   sudo ./Scripts/scci/build_scci_maillog_apps.sh
+
+5. Data onboarding props + search-time extractions — aio1
+   # FIRST: on fwd1, inspect the real sample data —
+   #   cd /var/log/mail && gzip -dc maillog-smtp2.1.gz | more
+   # confirm/adjust TIME_FORMAT and the EXTRACT-pid_qid / EXTRACT-milter_action
+   # / EXTRACT-spam_pct regexes in the script (or via PROPS_CONTENT) to match
+   # what you actually see, THEN run:
+   sudo ./Scripts/scci/build_scci_sourcetype_email_log_props.sh
+   sudo -u splunk env SPLUNK_USERNAME=admin SPLUNK_PASSWORD='<password>' /opt/splunk/bin/splunk restart
+
+6. Serverclass — aio1, LAST (after steps 1, 4)
+   # fill in FWD1_CLIENT_NAME first (use fwd1's own `hostname` output)
+   sudo ./Scripts/scci/deploy_scci_serverclass_config.sh
+   # wait for fwd1 to phone home (or restart it) and start forwarding
+
+7. Verify ingestion — from aio1's search bar
+   index=maildata | stats count by host, sourcetype   (expect fwd1 / email_log)
+   index=maildata milter add header                    (spot-check spam_pct extraction)
+
+8. Dashboard — aio1
+   sudo ./Scripts/scci/build_scci_email_dashboard.sh
+   # then in the GUI: Apps -> Email Data -> Mail Dashboard — review each
+   # panel against the lab's sketch and adjust SPL to taste; the lab does
+   # NOT require saved reports, just a working dashboard.
+
+Remaining manual pieces: the Google Drive base_configs download noted above,
+inspecting/confirming the actual maillog sample format in step 5 (these
+scripts ship a best-guess sendmail/milter regex set — the lab explicitly
+expects YOU to derive these from the real files, not from a script), any
+visual polish on the dashboard panels, and the final "Grade My Work" click
+in the lab UI.
